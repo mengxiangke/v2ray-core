@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/v2fly/v2ray-core/v4/common"
-	. "github.com/v2fly/v2ray-core/v4/common/buf"
-	"github.com/v2fly/v2ray-core/v4/transport/pipe"
+	"github.com/v2fly/v2ray-core/v5/common"
+	. "github.com/v2fly/v2ray-core/v5/common/buf"
+	"github.com/v2fly/v2ray-core/v5/transport/pipe"
 )
 
 func TestBytesReaderWriteTo(t *testing.T) {
@@ -73,7 +73,7 @@ func TestReadByte(t *testing.T) {
 	nBytes, err := reader.WriteTo(DiscardBytes)
 	common.Must(err)
 	if nBytes != 3 {
-		t.Error("unexpect bytes written: ", nBytes)
+		t.Error("unexpected bytes written: ", nBytes)
 	}
 }
 
@@ -105,7 +105,7 @@ func TestReadAtMost(t *testing.T) {
 	nBytes, err := reader.WriteTo(DiscardBytes)
 	common.Must(err)
 	if nBytes != 1 {
-		t.Error("unexpect bytes written: ", nBytes)
+		t.Error("unexpected bytes written: ", nBytes)
 	}
 }
 

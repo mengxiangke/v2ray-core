@@ -6,9 +6,9 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/v2fly/v2ray-core/v4/common"
-	"github.com/v2fly/v2ray-core/v4/common/buf"
-	"github.com/v2fly/v2ray-core/v4/common/serial"
+	"github.com/v2fly/v2ray-core/v5/common"
+	"github.com/v2fly/v2ray-core/v5/common/buf"
+	"github.com/v2fly/v2ray-core/v5/common/serial"
 )
 
 func TestUint16Serial(t *testing.T) {
@@ -18,7 +18,7 @@ func TestUint16Serial(t *testing.T) {
 	n, err := serial.WriteUint16(b, 10)
 	common.Must(err)
 	if n != 2 {
-		t.Error("expect 2 bytes writtng, but actually ", n)
+		t.Error("expect 2 bytes written, but actually ", n)
 	}
 	if diff := cmp.Diff(b.Bytes(), []byte{0, 10}); diff != "" {
 		t.Error(diff)
@@ -32,7 +32,7 @@ func TestUint64Serial(t *testing.T) {
 	n, err := serial.WriteUint64(b, 10)
 	common.Must(err)
 	if n != 8 {
-		t.Error("expect 8 bytes writtng, but actually ", n)
+		t.Error("expect 8 bytes written, but actually ", n)
 	}
 	if diff := cmp.Diff(b.Bytes(), []byte{0, 0, 0, 0, 0, 0, 0, 10}); diff != "" {
 		t.Error(diff)

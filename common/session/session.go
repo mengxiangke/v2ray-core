@@ -5,9 +5,9 @@ import (
 	"context"
 	"math/rand"
 
-	"github.com/v2fly/v2ray-core/v4/common/errors"
-	"github.com/v2fly/v2ray-core/v4/common/net"
-	"github.com/v2fly/v2ray-core/v4/common/protocol"
+	"github.com/v2fly/v2ray-core/v5/common/errors"
+	"github.com/v2fly/v2ray-core/v5/common/net"
+	"github.com/v2fly/v2ray-core/v5/common/protocol"
 )
 
 // ID of a session.
@@ -37,11 +37,11 @@ func ExportIDToError(ctx context.Context) errors.ExportOption {
 type Inbound struct {
 	// Source address of the inbound connection.
 	Source net.Destination
-	// Getaway address
+	// Gateway address
 	Gateway net.Destination
 	// Tag of the inbound proxy that handles the connection.
 	Tag string
-	// User is the user that authencates for the inbound. May be nil if the protocol allows anounymous traffic.
+	// User is the user that authenticates for the inbound. May be nil if the protocol allows anonymous traffic.
 	User *protocol.MemoryUser
 }
 
@@ -51,6 +51,8 @@ type Outbound struct {
 	Target net.Destination
 	// Gateway address
 	Gateway net.Address
+	// Domain resolver to use when dialing
+	Resolver func(ctx context.Context, domain string) net.Address
 }
 
 // SniffingRequest controls the behavior of content sniffing.
@@ -75,10 +77,10 @@ type Content struct {
 // Sockopt is the settings for socket connection.
 type Sockopt struct {
 	// Mark of the socket connection.
-	Mark int32
+	Mark uint32
 }
 
-// SetAttribute attachs additional string attributes to content.
+// SetAttribute attaches additional string attributes to content.
 func (c *Content) SetAttribute(name string, value string) {
 	if c.Attributes == nil {
 		c.Attributes = make(map[string]string)

@@ -1,40 +1,42 @@
-// +build !confonly
-
 package quic
 
 import (
 	"context"
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
-	"github.com/lucas-clemente/quic-go"
+	"github.com/quic-go/quic-go"
+	core "github.com/v2fly/v2ray-core/v5"
 
-	"github.com/v2fly/v2ray-core/v4/common"
-	"github.com/v2fly/v2ray-core/v4/common/net"
-	"github.com/v2fly/v2ray-core/v4/common/protocol/tls/cert"
-	"github.com/v2fly/v2ray-core/v4/common/signal/done"
-	"github.com/v2fly/v2ray-core/v4/transport/internet"
-	"github.com/v2fly/v2ray-core/v4/transport/internet/tls"
+	"github.com/v2fly/v2ray-core/v5/common"
+	"github.com/v2fly/v2ray-core/v5/common/net"
+	"github.com/v2fly/v2ray-core/v5/common/protocol/tls/cert"
+	"github.com/v2fly/v2ray-core/v5/common/signal/done"
+	"github.com/v2fly/v2ray-core/v5/transport/internet"
+	"github.com/v2fly/v2ray-core/v5/transport/internet/tls"
 )
 
 // Listener is an internet.Listener that listens for TCP connections.
 type Listener struct {
 	rawConn  *sysConn
-	listener quic.Listener
+	listener *quic.Listener
 	done     *done.Instance
 	addConn  internet.ConnHandler
 }
 
-func (l *Listener) acceptStreams(session quic.Session) {
+func (l *Listener) acceptStreams(conn *quic.Conn) {
 	for {
-		stream, err := session.AcceptStream(context.Background())
+		stream, err := conn.AcceptStream(context.Background())
 		if err != nil {
 			newError("failed to accept stream").Base(err).WriteToLog()
 			select {
-			case <-session.Context().Done():
+			case <-conn.Context().Done():
 				return
 			case <-l.done.Wait():
-				if err := session.CloseWithError(0, ""); err != nil {
-					newError("failed to close session").Base(err).WriteToLog()
+				if err := conn.CloseWithError(0, ""); err != nil {
+					newError("failed to close connection").Base(err).WriteToLog()
 				}
 				return
 			default:
@@ -45,8 +47,8 @@ func (l *Listener) acceptStreams(session quic.Session) {
 
 		conn := &interConn{
 			stream: stream,
-			local:  session.LocalAddr(),
-			remote: session.RemoteAddr(),
+			local:  conn.LocalAddr(),
+			remote: conn.RemoteAddr(),
 		}
 
 		l.addConn(conn)
@@ -57,7 +59,7 @@ func (l *Listener) keepAccepting() {
 	for {
 		conn, err := l.listener.Accept(context.Background())
 		if err != nil {
-			newError("failed to accept QUIC sessions").Base(err).WriteToLog()
+			newError("failed to accept QUIC connections").Base(err).WriteToLog()
 			if l.done.Done() {
 				break
 			}
@@ -99,26 +101,62 @@ func Listen(ctx context.Context, address net.Address, port net.Port, streamSetti
 		IP:   address.IP(),
 		Port: int(port),
 	}, streamSettings.SocketSettings)
-
 	if err != nil {
 		return nil, err
 	}
 
 	quicConfig := &quic.Config{
-		ConnectionIDLength:    12,
 		HandshakeIdleTimeout:  time.Second * 8,
 		MaxIdleTimeout:        time.Second * 45,
 		MaxIncomingStreams:    32,
 		MaxIncomingUniStreams: -1,
+		KeepAlivePeriod:       time.Second * 15,
 	}
 
-	conn, err := wrapSysConn(rawConn, config)
+	conn, err := wrapSysConn(rawConn.(*net.UDPConn), config)
 	if err != nil {
 		conn.Close()
 		return nil, err
 	}
 
-	qListener, err := quic.Listen(conn, tlsConfig.GetTLSConfig(), quicConfig)
+	connectionIDLength := 4
+
+	if config.ConnectionIdLength != nil {
+		connectionIDLength = int(*config.ConnectionIdLength)
+	}
+
+	tr := quic.Transport{
+		Conn:               conn,
+		ConnectionIDLength: connectionIDLength,
+	}
+
+	defaultNextProtos := []string{"h3"}
+
+	{
+		// Until v5.61.0, server will have a default alpn of h3,h2,http/1.1 then h3 only
+		extractXY := func(s string) (x, y string, err error) {
+			parts := strings.SplitN(s, ".", 3)
+			if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+				return "", "", fmt.Errorf("invalid format: %q", s)
+			}
+			return parts[0], parts[1], nil
+		}
+		func() {
+			if major, middle, err := extractXY(core.Version()); err != nil {
+				return
+			} else {
+				if major != "5" {
+					return
+				}
+				if middleInt, err := strconv.ParseInt(middle, 10, 64); err != nil || middleInt > 60 {
+					return
+				}
+			}
+			defaultNextProtos = []string{"h3", "h2", "http/1.1"}
+		}()
+	}
+
+	qListener, err := tr.Listen(tlsConfig.GetTLSConfig(tls.WithNextProto(defaultNextProtos...)), quicConfig)
 	if err != nil {
 		conn.Close()
 		return nil, err

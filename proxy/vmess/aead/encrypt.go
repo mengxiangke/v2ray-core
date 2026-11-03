@@ -9,7 +9,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/v2fly/v2ray-core/v4/common"
+	"github.com/v2fly/v2ray-core/v5/common"
 )
 
 func SealVMessAEADHeader(key [16]byte, data []byte) []byte {
@@ -40,7 +40,6 @@ func SealVMessAEADHeader(key [16]byte, data []byte) []byte {
 		}
 
 		payloadHeaderAEAD, err := cipher.NewGCM(payloadHeaderLengthAEADAESBlock)
-
 		if err != nil {
 			panic(err.Error())
 		}
@@ -61,7 +60,6 @@ func SealVMessAEADHeader(key [16]byte, data []byte) []byte {
 		}
 
 		payloadHeaderAEAD, err := cipher.NewGCM(payloadHeaderAEADAESBlock)
-
 		if err != nil {
 			panic(err.Error())
 		}
@@ -69,7 +67,7 @@ func SealVMessAEADHeader(key [16]byte, data []byte) []byte {
 		payloadHeaderAEADEncrypted = payloadHeaderAEAD.Seal(nil, payloadHeaderAEADNonce, data, generatedAuthID[:])
 	}
 
-	var outputBuffer = bytes.NewBuffer(nil)
+	outputBuffer := bytes.NewBuffer(nil)
 
 	common.Must2(outputBuffer.Write(generatedAuthID[:]))               // 16
 	common.Must2(outputBuffer.Write(payloadHeaderLengthAEADEncrypted)) // 2+16
@@ -112,7 +110,6 @@ func OpenVMessAEADHeader(key [16]byte, authid [16]byte, data io.Reader) ([]byte,
 		}
 
 		payloadHeaderLengthAEAD, err := cipher.NewGCM(payloadHeaderAEADAESBlock)
-
 		if err != nil {
 			panic(err.Error())
 		}
@@ -132,7 +129,7 @@ func OpenVMessAEADHeader(key [16]byte, authid [16]byte, data io.Reader) ([]byte,
 
 	var decryptedAEADHeaderPayloadR []byte
 
-	var payloadHeaderAEADEncryptedReadedBytesCounts int
+	var payloadHeaderAEADEncryptedReadBytesCounts int
 
 	{
 		payloadHeaderAEADKey := KDF16(key[:], KDFSaltConstVMessHeaderPayloadAEADKey, string(authid[:]), string(nonce[:]))
@@ -142,8 +139,8 @@ func OpenVMessAEADHeader(key [16]byte, authid [16]byte, data io.Reader) ([]byte,
 		// 16 == AEAD Tag size
 		payloadHeaderAEADEncrypted := make([]byte, length+16)
 
-		payloadHeaderAEADEncryptedReadedBytesCounts, err = io.ReadFull(data, payloadHeaderAEADEncrypted)
-		bytesRead += payloadHeaderAEADEncryptedReadedBytesCounts
+		payloadHeaderAEADEncryptedReadBytesCounts, err = io.ReadFull(data, payloadHeaderAEADEncrypted)
+		bytesRead += payloadHeaderAEADEncryptedReadBytesCounts
 		if err != nil {
 			return nil, false, bytesRead, err
 		}
@@ -154,7 +151,6 @@ func OpenVMessAEADHeader(key [16]byte, authid [16]byte, data io.Reader) ([]byte,
 		}
 
 		payloadHeaderAEAD, err := cipher.NewGCM(payloadHeaderAEADAESBlock)
-
 		if err != nil {
 			panic(err.Error())
 		}

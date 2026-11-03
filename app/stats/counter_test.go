@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	. "github.com/v2fly/v2ray-core/v4/app/stats"
-	"github.com/v2fly/v2ray-core/v4/common"
-	"github.com/v2fly/v2ray-core/v4/features/stats"
+	. "github.com/v2fly/v2ray-core/v5/app/stats"
+	"github.com/v2fly/v2ray-core/v5/common"
+	"github.com/v2fly/v2ray-core/v5/features/stats"
 )
 
 func TestStatsCounter(t *testing.T) {
@@ -18,7 +18,7 @@ func TestStatsCounter(t *testing.T) {
 	common.Must(err)
 
 	if v := c.Add(1); v != 1 {
-		t.Fatal("unpexcted Add(1) return: ", v, ", wanted ", 1)
+		t.Fatal("unexpected Add(1) return: ", v, ", wanted ", 1)
 	}
 
 	if v := c.Set(0); v != 1 {

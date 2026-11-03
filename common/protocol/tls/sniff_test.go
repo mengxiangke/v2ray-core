@@ -3,7 +3,7 @@ package tls_test
 import (
 	"testing"
 
-	. "github.com/v2fly/v2ray-core/v4/common/protocol/tls"
+	. "github.com/v2fly/v2ray-core/v5/common/protocol/tls"
 )
 
 func TestTLSHeaders(t *testing.T) {
@@ -147,7 +147,7 @@ func TestTLSHeaders(t *testing.T) {
 		header, err := SniffTLS(test.input)
 		if test.err {
 			if err == nil {
-				t.Errorf("Exepct error but nil in test %v", test)
+				t.Errorf("Expect error but nil in test %v", test)
 			}
 		} else {
 			if err != nil {

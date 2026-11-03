@@ -11,8 +11,10 @@ const (
 	inboundSessionKey
 	outboundSessionKey
 	contentSessionKey
-	muxPreferedSessionKey
+	muxPreferredSessionKey
 	sockoptSessionKey
+	trackedConnectionErrorKey
+	handlerSessionKey // nolint: varcheck
 )
 
 // ContextWithID returns a new context with the given ID.
@@ -63,12 +65,12 @@ func ContentFromContext(ctx context.Context) *Content {
 
 // ContextWithMuxPrefered returns a new context with the given bool
 func ContextWithMuxPrefered(ctx context.Context, forced bool) context.Context {
-	return context.WithValue(ctx, muxPreferedSessionKey, forced)
+	return context.WithValue(ctx, muxPreferredSessionKey, forced)
 }
 
 // MuxPreferedFromContext returns value in this context, or false if not contained.
 func MuxPreferedFromContext(ctx context.Context) bool {
-	if val, ok := ctx.Value(muxPreferedSessionKey).(bool); ok {
+	if val, ok := ctx.Value(muxPreferredSessionKey).(bool); ok {
 		return val
 	}
 	return false
@@ -115,4 +117,19 @@ func SetForcedOutboundTagToContext(ctx context.Context, tag string) context.Cont
 	}
 	ContentFromContext(ctx).SetAttribute("forcedOutboundTag", tag)
 	return ctx
+}
+
+type TrackedRequestErrorFeedback interface {
+	SubmitError(err error)
+}
+
+func SubmitOutboundErrorToOriginator(ctx context.Context, err error) {
+	if errorTracker := ctx.Value(trackedConnectionErrorKey); errorTracker != nil {
+		errorTracker := errorTracker.(TrackedRequestErrorFeedback)
+		errorTracker.SubmitError(err)
+	}
+}
+
+func TrackedConnectionError(ctx context.Context, tracker TrackedRequestErrorFeedback) context.Context {
+	return context.WithValue(ctx, trackedConnectionErrorKey, tracker)
 }

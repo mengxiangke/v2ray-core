@@ -1,35 +1,46 @@
-// +build !confonly
-
 package dns
 
 import (
 	"context"
 	"io"
 	"sync"
+	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
 
-	core "github.com/v2fly/v2ray-core/v4"
-	"github.com/v2fly/v2ray-core/v4/common"
-	"github.com/v2fly/v2ray-core/v4/common/buf"
-	"github.com/v2fly/v2ray-core/v4/common/net"
-	dns_proto "github.com/v2fly/v2ray-core/v4/common/protocol/dns"
-	"github.com/v2fly/v2ray-core/v4/common/session"
-	"github.com/v2fly/v2ray-core/v4/common/task"
-	"github.com/v2fly/v2ray-core/v4/features/dns"
-	"github.com/v2fly/v2ray-core/v4/transport"
-	"github.com/v2fly/v2ray-core/v4/transport/internet"
+	core "github.com/v2fly/v2ray-core/v5"
+	"github.com/v2fly/v2ray-core/v5/common"
+	"github.com/v2fly/v2ray-core/v5/common/buf"
+	"github.com/v2fly/v2ray-core/v5/common/net"
+	dns_proto "github.com/v2fly/v2ray-core/v5/common/protocol/dns"
+	"github.com/v2fly/v2ray-core/v5/common/session"
+	"github.com/v2fly/v2ray-core/v5/common/signal"
+	"github.com/v2fly/v2ray-core/v5/common/strmatcher"
+	"github.com/v2fly/v2ray-core/v5/common/task"
+	"github.com/v2fly/v2ray-core/v5/features/dns"
+	"github.com/v2fly/v2ray-core/v5/features/policy"
+	"github.com/v2fly/v2ray-core/v5/transport"
+	"github.com/v2fly/v2ray-core/v5/transport/internet"
 )
 
 func init() {
 	common.Must(common.RegisterConfig((*Config)(nil), func(ctx context.Context, config interface{}) (interface{}, error) {
 		h := new(Handler)
-		if err := core.RequireFeatures(ctx, func(dnsClient dns.Client) error {
-			return h.Init(config.(*Config), dnsClient)
+		if err := core.RequireFeatures(ctx, func(dnsClient dns.Client, policyManager policy.Manager) error {
+			return h.Init(config.(*Config), dnsClient, policyManager)
 		}); err != nil {
 			return nil, err
 		}
 		return h, nil
+	}))
+
+	common.Must(common.RegisterConfig((*SimplifiedConfig)(nil), func(ctx context.Context, config interface{}) (interface{}, error) {
+		simplifiedServer := config.(*SimplifiedConfig)
+		_ = simplifiedServer
+		fullConfig := &Config{}
+		fullConfig.OverrideResponseTtl = simplifiedServer.OverrideResponseTtl
+		fullConfig.ResponseTtl = simplifiedServer.ResponseTtl
+		return common.CreateObject(ctx, fullConfig)
 	}))
 }
 
@@ -43,10 +54,20 @@ type Handler struct {
 	ipv6Lookup      dns.IPv6Lookup
 	ownLinkVerifier ownLinkVerifier
 	server          net.Destination
+	timeout         time.Duration
+
+	config *Config
+
+	nonIPQuery string
 }
 
-func (h *Handler) Init(config *Config, dnsClient dns.Client) error {
+func (h *Handler) Init(config *Config, dnsClient dns.Client, policyManager policy.Manager) error {
+	// Enable FakeDNS for DNS outbound
+	if clientWithFakeDNS, ok := dnsClient.(dns.ClientWithFakeDNS); ok {
+		dnsClient = clientWithFakeDNS.AsFakeDNSClient()
+	}
 	h.client = dnsClient
+	h.timeout = policyManager.ForLevel(config.UserLevel).Timeouts.ConnectionIdle
 
 	if ipv4lookup, ok := dnsClient.(dns.IPv4Lookup); ok {
 		h.ipv4Lookup = ipv4lookup
@@ -67,6 +88,10 @@ func (h *Handler) Init(config *Config, dnsClient dns.Client) error {
 	if config.Server != nil {
 		h.server = config.Server.AsDestination()
 	}
+
+	h.config = config
+
+	h.nonIPQuery = config.Non_IPQuery
 	return nil
 }
 
@@ -159,6 +184,9 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, d internet.
 		}
 	}
 
+	ctx, cancel := context.WithCancel(ctx)
+	timer := signal.CancelAfterInactivity(ctx, cancel, h.timeout)
+
 	request := func() error {
 		defer conn.Close()
 
@@ -172,15 +200,20 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, d internet.
 				return err
 			}
 
+			timer.Update()
+
 			if !h.isOwnLink(ctx) {
 				isIPQuery, domain, id, qType := parseIPQuery(b.Bytes())
-				if isIPQuery {
-					go h.handleIPQuery(id, qType, domain, writer)
-					continue
+				if isIPQuery || h.nonIPQuery != "drop" {
+					if domain, err := strmatcher.ToDomain(domain); err == nil {
+						go h.handleIPQuery(id, qType, domain, writer)
+					} else {
+						h.handleDNSError(id, dnsmessage.RCodeFormatError, writer)
+					}
+				} else {
+					h.handleDNSError(id, dnsmessage.RCodeNotImplemented, writer)
 				}
-			}
-
-			if err := connWriter.WriteMessage(b); err != nil {
+			} else if err := connWriter.WriteMessage(b); err != nil {
 				return err
 			}
 		}
@@ -196,6 +229,8 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, d internet.
 			if err != nil {
 				return err
 			}
+
+			timer.Update()
 
 			if err := writer.WriteMessage(b); err != nil {
 				return err
@@ -215,12 +250,8 @@ func (h *Handler) handleIPQuery(id uint16, qType dnsmessage.Type, domain string,
 	var err error
 
 	var ttl uint32 = 600
-
-	// Do NOT skip FakeDNS
-	if c, ok := h.client.(dns.ClientWithIPOption); ok {
-		c.SetFakeDNSOption(true)
-	} else {
-		newError("dns.Client doesn't implement ClientWithIPOption")
+	if h.config.OverrideResponseTtl {
+		ttl = h.config.ResponseTtl
 	}
 
 	switch qType {
@@ -266,6 +297,35 @@ func (h *Handler) handleIPQuery(id uint16, qType dnsmessage.Type, domain string,
 			common.Must(builder.AAAAResource(rHeader, r))
 		}
 	}
+	msgBytes, err := builder.Finish()
+	if err != nil {
+		newError("pack message").Base(err).WriteToLog()
+		b.Release()
+		return
+	}
+	b.Resize(0, int32(len(msgBytes)))
+
+	if err := writer.WriteMessage(b); err != nil {
+		newError("write IP answer").Base(err).WriteToLog()
+	}
+}
+
+func (h *Handler) handleDNSError(id uint16, rCode dnsmessage.RCode, writer dns_proto.MessageWriter) {
+	var err error
+
+	b := buf.New()
+	rawBytes := b.Extend(buf.Size)
+	builder := dnsmessage.NewBuilder(rawBytes[:0], dnsmessage.Header{
+		ID:                 id,
+		RCode:              rCode,
+		RecursionAvailable: true,
+		RecursionDesired:   true,
+		Response:           true,
+	})
+	builder.EnableCompression()
+	common.Must(builder.StartQuestions())
+	common.Must(builder.StartAnswers())
+
 	msgBytes, err := builder.Finish()
 	if err != nil {
 		newError("pack message").Base(err).WriteToLog()
